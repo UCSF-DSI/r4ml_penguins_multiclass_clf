@@ -203,10 +203,63 @@ conf_mat_resampled(rf_nominal_included_fit, tidy = FALSE) %>%
 collect_metrics(rf_nominal_included_fit)
 ```
 
+# Hyperparameter Tuning
+
+```{r}
+tune_rf_mdl <- rand_forest(mtry = tune(),
+                           trees = 50,
+                           min_n = tune()) %>%
+  set_mode("classification")
+```
+
+```{r}
+tune_rf_wf <- workflow() %>%
+  add_recipe(nominal_included_rec) %>%
+  add_model(tune_rf_mdl)
+```
+
+```{r}
+rf_grid <- grid_regular(
+  mtry(range = c(10, 30)),
+  min_n(range = c(2, 8)),
+  levels = 5
+)
+
+rf_grid
+```
+
+```{r}
+doParallel::registerDoParallel()
+
+rf_tuning_res <- tune_rf_wf %>%
+  tune_grid(
+    grid = rf_grid,
+    resamples = train_eval,
+    metrics = eval_metrics
+  )
+
+rf_tuning_res %>% collect_metrics()
+```
+
+```{r}
+final_mdl <- tune_rf_mdl %>%
+  finalize_model(
+    rf_tuning_res %>% select_best("f_meas")
+  )
+
+final_mdl
+```
+
 # Final Results
 
 ```{r}
-final_results <- rf_nominal_included_wf %>%
+final_wf <- workflow() %>%
+  add_recipe(nominal_included_rec) %>%
+  add_model(final_mdl)
+```
+
+```{r}
+final_results <- final_wf %>%
   last_fit(split = data_split, metrics = eval_metrics)
 ```
 
@@ -220,6 +273,7 @@ final_results$.predictions %>%
   conf_mat(truth = species, estimate = .pred_class) %>%
   autoplot(type = "heatmap")
 ```
+
 
 # Save Results
 
