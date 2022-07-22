@@ -1,0 +1,233 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Load Required Libraries
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+set.seed(400)
+```
+
+# Read Data
+
+```{r}
+library(palmerpenguins)
+penguins_to_clf <- penguins
+penguins_to_clf
+```
+
+
+# Split Data
+
+```{r}
+data_split <- initial_split(penguins_to_clf, prop = 0.80)
+data_train <- training(data_split)
+
+data_train
+```
+
+```{r}
+train_eval <- validation_split(data_train, prop = 0.8)
+```
+
+# Explore Data
+
+```{r}
+data_train %>%
+  ggpairs()
+
+ggsave(
+  filename = "pairs.png",
+  device = "png",
+  path = "../plots",
+  width = 28,
+  height = 16,
+  units = "in"
+)
+```
+
+# Set Up Preprocessing (Recipe)
+
+```{r}
+numeric_only_rec <- recipe(species ~ bill_length_mm + bill_depth_mm + 
+                           flipper_length_mm + body_mass_g, 
+                           data = data_train) %>%
+  step_impute_mean(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+```
+
+```{r}
+nominal_included_rec <- recipe(species ~ bill_length_mm + bill_depth_mm + 
+                               flipper_length_mm + body_mass_g + sex, 
+                               data = data_train) %>%
+  step_impute_mean(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_impute_mode(all_nominal_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+```
+
+# Set up Model
+
+```{r}
+knn_mdl <- nearest_neighbor() %>%
+  set_mode("classification")
+```
+
+```{r}
+log_reg_mdl <- multinom_reg() %>%
+  set_mode("classification")
+```
+
+```{r}
+rf_mdl <- rand_forest() %>%
+  set_mode("classification")
+```
+
+# Set up Workflows
+
+```{r}
+knn_numeric_only_wf <- workflow() %>%
+  add_recipe(numeric_only_rec) %>%
+  add_model(knn_mdl)
+```
+
+```{r}
+knn_include_nominal_wf <- workflow() %>%
+  add_recipe(nominal_included_rec) %>%
+  add_model(knn_mdl)
+```
+
+```{r}
+lr_numeric_only_wf <- workflow() %>%
+  add_recipe(numeric_only_rec) %>%
+  add_model(log_reg_mdl)
+```
+
+```{r}
+lr_nominal_included_wf <- workflow() %>%
+  add_recipe(nominal_included_rec) %>%
+  add_model(log_reg_mdl)
+```
+
+```{r}
+rf_numeric_only_wf <- workflow() %>%
+  add_recipe(numeric_only_rec) %>%
+  add_model(rf_mdl)
+```
+
+```{r}
+rf_nominal_included_wf <- workflow() %>%
+  add_recipe(nominal_included_rec) %>%
+  add_model(rf_mdl)
+```
+
+# Define Metrics
+
+```{r}
+eval_metrics <- metric_set(f_meas,
+                           pr_auc, 
+                           roc_auc,
+                           precision, 
+                           recall)
+```
+
+# Train and Evaluate Workflow
+
+```{r}
+knn_numeric_only_fit <- knn_numeric_only_wf %>%
+  fit_resamples(train_eval, 
+                control = control_resamples(save_pred = TRUE),
+                metrics = eval_metrics)
+
+conf_mat_resampled(knn_numeric_only_fit, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+collect_metrics(knn_numeric_only_fit)
+```
+
+```{r}
+knn_include_nominal_fit <- knn_include_nominal_wf %>%
+  fit_resamples(train_eval, 
+                control = control_resamples(save_pred = TRUE),
+                metrics = eval_metrics)
+
+conf_mat_resampled(knn_include_nominal_fit, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+collect_metrics(knn_include_nominal_fit)
+```
+
+```{r}
+lr_numeric_only_fit <- lr_numeric_only_wf %>%
+  fit_resamples(train_eval, 
+                control = control_resamples(save_pred = TRUE),
+                metrics = eval_metrics)
+
+conf_mat_resampled(lr_numeric_only_fit, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+collect_metrics(lr_numeric_only_fit)
+```
+
+```{r}
+lr_nominal_included_fit <- lr_nominal_included_wf %>%
+  fit_resamples(train_eval, 
+                control = control_resamples(save_pred = TRUE),
+                metrics = eval_metrics)
+
+conf_mat_resampled(lr_nominal_included_fit, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+collect_metrics(lr_nominal_included_fit)
+```
+
+```{r}
+rf_numeric_only_fit <- rf_numeric_only_wf %>%
+  fit_resamples(train_eval, 
+                control = control_resamples(save_pred = TRUE),
+                metrics = eval_metrics)
+
+conf_mat_resampled(rf_numeric_only_fit, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+collect_metrics(rf_numeric_only_fit)
+```
+
+```{r}
+rf_nominal_included_fit <- rf_nominal_included_wf %>%
+  fit_resamples(train_eval, 
+                control = control_resamples(save_pred = TRUE),
+                metrics = eval_metrics)
+
+conf_mat_resampled(rf_nominal_included_fit, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+collect_metrics(rf_nominal_included_fit)
+```
+
+# Final Results
+
+```{r}
+final_results <- rf_nominal_included_wf %>%
+  last_fit(split = data_split, metrics = eval_metrics)
+```
+
+```{r}
+final_results$.metrics
+```
+
+```{r}
+final_results$.predictions %>%
+  as.data.frame() %>%
+  conf_mat(truth = species, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+```
+
+# Save Results
+
+```{r}
+data_split %>% saveRDS(file = "../data/data_split.RData")
+train_eval %>% saveRDS(file = "../data/train_eval.RData")
+```
+
+```{r}
+final_results %>% saveRDS(file = "../models/final_results.RData")
+```
